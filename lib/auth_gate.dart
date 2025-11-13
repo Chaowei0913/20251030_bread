@@ -14,10 +14,11 @@ class AuthGate extends StatelessWidget {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
-        if (snapshot.hasData) {
+        else if (snapshot.hasData) {
           return const HomePage(); // 已登入
-        }
-        return const LoginPage(); // 未登入
+        }else
+        {
+        return const LoginPage(); }
       },
     );
   }

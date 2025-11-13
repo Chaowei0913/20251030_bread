@@ -5,7 +5,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 class LoginPage extends StatelessWidget {
   const LoginPage({super.key});
 
-  Future<void> signInWithGoogle() async {
+  Future<void> signInWithGoogle(BuildContext context) async {
     try {
       final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
       if (googleUser == null) return; // 使用者取消登入
@@ -19,8 +19,15 @@ class LoginPage extends StatelessWidget {
       );
 
       await FirebaseAuth.instance.signInWithCredential(credential);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('登入成功')),
+      );
     } catch (e) {
       print('Google 登入失敗：$e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('登入失敗：$e')),
+      );
     }
   }
 
@@ -30,7 +37,7 @@ class LoginPage extends StatelessWidget {
       backgroundColor: Colors.deepPurple.shade50,
       body: Center(
         child: ElevatedButton.icon(
-          onPressed: signInWithGoogle,
+          onPressed: () => signInWithGoogle(context),
           icon: const Icon(Icons.login),
           label: const Text('使用 Google 登入'),
           style: ElevatedButton.styleFrom(

@@ -12,9 +12,16 @@ class RouteService {
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
+
+      // routes[0].geometry.coordinates 是 List<List<double>>
       final route = data['routes'][0]['geometry']['coordinates'] as List;
-      // 轉換成 LatLng 座標格式
-      return route.map((coord) => LatLng(coord[1], coord[0])).toList();
+
+      // 轉換成 LatLng 座標格式 (OSRM 回傳的是 [lon, lat])
+      return route.map((coord) {
+        final lon = coord[0] as double;
+        final lat = coord[1] as double;
+        return LatLng(lat, lon);
+      }).toList();
     } else {
       throw Exception('OSRM 請求失敗: ${response.statusCode}');
     }
