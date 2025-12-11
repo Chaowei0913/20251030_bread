@@ -8,6 +8,8 @@ import 'package:latlong2/latlong.dart' show Distance, LengthUnit;
 import 'location_service.dart';
 import 'firestore_service.dart';
 import 'route_service.dart';
+import 'friends_page.dart';
+
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -266,6 +268,17 @@ class _HomePageState extends State<HomePage> {
                   await signOut();
                 },
               ),
+            ListTile(
+              leading: const Icon(Icons.people),
+              title: const Text("朋友列表"),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => FriendsPage()),
+                );
+              },
+            ),
           ],
         ),
       ),

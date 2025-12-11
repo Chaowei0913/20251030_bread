@@ -1,50 +1,68 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
-class LoginPage extends StatelessWidget {
+class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
-  Future<void> signInWithGoogle(BuildContext context) async {
-    try {
-      final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
-      if (googleUser == null) return; // 使用者取消登入
+  @override
+  State<LoginPage> createState() => _LoginPageState();
+}
 
+class _LoginPageState extends State<LoginPage> {
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    scopes: ['email'],
+  );
+
+  // ⚠️ google_sign_in 不需要 initialize()！
+  // 🚫 GoogleSignIn.initialize(); 會報錯 → 不能用
+
+  Future<void> signInWithGoogle() async {
+    try {
+      // 1️⃣ 跳出 Google 登入視窗
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) return;
+
+      // 2️⃣ 取得 token
       final GoogleSignInAuthentication googleAuth =
       await googleUser.authentication;
 
+      // 3️⃣ 使用 FirebaseAuth 登入
       final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
+        accessToken: googleAuth.accessToken,
       );
 
+      final userCredential =
       await FirebaseAuth.instance.signInWithCredential(credential);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('登入成功')),
-      );
+      final user = userCredential.user;
+
+      // 4️⃣ 更新 Firestore
+      await FirebaseFirestore.instance
+          .collection("users")
+          .doc(user!.uid)
+          .set({
+        "name": user.displayName,
+        "email": user.email,
+        "photoURL": user.photoURL,
+        "lastLogin": FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      if (mounted) Navigator.pop(context);
     } catch (e) {
-      print('Google 登入失敗：$e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('登入失敗：$e')),
-      );
+      print("❌ Google 登入失敗: $e");
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.deepPurple.shade50,
       body: Center(
-        child: ElevatedButton.icon(
-          onPressed: () => signInWithGoogle(context),
-          icon: const Icon(Icons.login),
-          label: const Text('使用 Google 登入'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.deepPurple,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-          ),
+        child: ElevatedButton(
+          onPressed: signInWithGoogle,
+          child: const Text("Google 登入"),
         ),
       ),
     );
