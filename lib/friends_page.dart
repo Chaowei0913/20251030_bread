@@ -11,6 +11,7 @@ class FriendsPage extends StatefulWidget {
 }
 
 class _FriendsPageState extends State<FriendsPage> {
+  final TextEditingController _emailController = TextEditingController();
   final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: ['email']);
   User? user = FirebaseAuth.instance.currentUser;
 
@@ -72,6 +73,77 @@ class _FriendsPageState extends State<FriendsPage> {
     );
   }
 
+  Future<void> sendFriendRequest() async {  //好友申請
+    final email = _emailController.text.trim();
+
+    if (email.isEmpty || user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('請輸入 Email')),
+      );
+      return;
+    }
+
+    try {
+      // 1️⃣ 用 email 找使用者
+      final query = await FirebaseFirestore.instance
+          .collection('users')
+          .where('email', isEqualTo: email)
+          .limit(1)
+          .get();
+
+      if (query.docs.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('❌ 找不到此使用者')),
+        );
+        return;
+      }
+
+      final targetDoc = query.docs.first;
+      final targetUid = targetDoc.id;
+
+      // 2️⃣ ❌ 不能加自己
+      if (targetUid == user!.uid) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('❌ 不能加自己為好友')),
+        );
+        return;
+      }
+
+      // 3️⃣ ❌ 檢查是否已經是好友
+      final myDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user!.uid)
+          .get();
+
+      final List friends = myDoc.data()?['friends'] ?? [];
+      if (friends.contains(targetUid)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('❌ 你們已經是好友了')),
+        );
+        return;
+      }
+
+      // 4️⃣ 新增好友邀請
+      await FirebaseFirestore.instance.collection('friend_requests').add({
+        'fromUid': user!.uid,
+        'toUid': targetUid,
+        'status': 'pending',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      _emailController.clear();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('✅ 好友邀請已送出')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('❌ 發生錯誤：$e')),
+      );
+    }
+  }
+
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -88,7 +160,29 @@ class _FriendsPageState extends State<FriendsPage> {
               )
             else ...[
               Text('已登入: ${user!.displayName}'),
+              const SizedBox(height: 20),
+
+              // 🔹 輸入好友 Email 的輸入框
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: TextField(
+                  controller: _emailController, // ⭐ 就是我們剛剛新增的變數
+                  decoration: const InputDecoration(
+                    labelText: '輸入好友 Email',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+
               const SizedBox(height: 10),
+
+              ElevatedButton(
+                onPressed: sendFriendRequest,
+                child: const Text('新增好友'),
+              ),
+
+              const SizedBox(height: 20),
+
               ElevatedButton.icon(
                 onPressed: signOut,
                 icon: const Icon(Icons.logout),
