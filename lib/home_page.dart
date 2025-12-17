@@ -31,6 +31,7 @@ class _HomePageState extends State<HomePage> {
   LatLng? lastRecordedPosition;
   double minDistance = 5.0; // GPS 最小移動距離（公尺）
   StreamSubscription<LatLng>? _locationSubscription;
+  StreamSubscription<LatLng>? _singleLocationSubscription;
 
   // === 登入相關 ===
   User? user = FirebaseAuth.instance.currentUser;
@@ -233,6 +234,45 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  void _getCurrentLocationOnce() {
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('🛑 請先登入才能取得位置')),
+      );
+      return;
+    }
+
+    // 如果正在錄製，直接提示
+    if (isRecording) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('⚠️ 記錄中，請先停止記錄')),
+      );
+      return;
+    }
+
+    // 取消之前的單次定位（避免重複）
+    _singleLocationSubscription?.cancel();
+
+    _singleLocationSubscription =
+        LocationService.getPositionStream().listen((position) {
+          setState(() {
+            currentPosition = position;
+          });
+
+          // 地圖移動到目前位置
+          mapController.move(position, 16);
+
+          // ✅ 只取一次就停止
+          _singleLocationSubscription?.cancel();
+          _singleLocationSubscription = null;
+        }, onError: (e) {
+          debugPrint('❌ 取得位置失敗: $e');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('取得位置失敗: $e')),
+          );
+        });
+      }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -345,7 +385,7 @@ class _HomePageState extends State<HomePage> {
           // 2. 獨立的「開始/停止記錄」按鈕 (定位到左下角)
           // ⚠️ 注意：這個 Positioned Widget 必須在 Stack 的 children 列表內！
           Positioned(
-            bottom: 70, // 距離底部 20
+            bottom: 150, // 距離底部 200
             left: 20,    // 距離左側 20
             child: FloatingActionButton.extended(
               heroTag: "btn_record",
@@ -386,6 +426,16 @@ class _HomePageState extends State<HomePage> {
             child: const Icon(Icons.delete),
           ),
           const SizedBox(height: 40), // 增加底部間距
+
+          // 取得目前位置（不記錄）
+          FloatingActionButton(
+            heroTag: "btn_get_location",
+            onPressed: _getCurrentLocationOnce,
+            backgroundColor: Colors.orange,
+            foregroundColor: Colors.white,
+            child: const Icon(Icons.navigation),
+          ),
+          const SizedBox(height: 10),
         ],
       ),
     );
