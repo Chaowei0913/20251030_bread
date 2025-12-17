@@ -143,11 +143,62 @@ class _FriendsPageState extends State<FriendsPage> {
     }
   }
 
+  Future<void> acceptFriendRequest(String requestId, String fromUid) async {
+    try {
+      final batch = FirebaseFirestore.instance.batch();
+
+      final myRef =
+      FirebaseFirestore.instance.collection('users').doc(user!.uid);
+      final friendRef =
+      FirebaseFirestore.instance.collection('users').doc(fromUid);
+      final requestRef = FirebaseFirestore.instance
+          .collection('friend_requests')
+          .doc(requestId);
+
+      // 雙方加好友
+      batch.update(myRef, {
+        'friends': FieldValue.arrayUnion([fromUid])
+      });
+
+      batch.update(friendRef, {
+        'friends': FieldValue.arrayUnion([user!.uid])
+      });
+
+      // 更新邀請狀態
+      batch.update(requestRef, {'status': 'accepted'});
+
+      await batch.commit();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('✅ 已成為好友')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('❌ 接受失敗：$e')),
+      );
+    }
+  }
+  Future<void> rejectFriendRequest(String requestId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('friend_requests')
+          .doc(requestId)
+          .update({'status': 'rejected'});
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已拒絕好友邀請')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('❌ 拒絕失敗：$e')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('朋友列表')),
+      appBar: AppBar(title: const Text('好友申請')),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -168,7 +219,7 @@ class _FriendsPageState extends State<FriendsPage> {
                 child: TextField(
                   controller: _emailController, // ⭐ 就是我們剛剛新增的變數
                   decoration: const InputDecoration(
-                    labelText: '輸入好友 Email',
+                    labelText: '輸入 Email',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -181,12 +232,70 @@ class _FriendsPageState extends State<FriendsPage> {
                 child: const Text('新增好友'),
               ),
 
+              const SizedBox(height: 30),
+
+              const Text(
+                '收到的好友邀請',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+
               const SizedBox(height: 20),
 
-              ElevatedButton.icon(
-                onPressed: signOut,
-                icon: const Icon(Icons.logout),
-                label: const Text('登出'),
+              StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('friend_requests')
+                    .where('toUid', isEqualTo: user!.uid)
+                    .where('status', isEqualTo: 'pending')
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) {
+                    return const CircularProgressIndicator();
+                  }
+
+                  final requests = snapshot.data!.docs;
+
+                  if (requests.isEmpty) {
+                    return const Text('目前沒有好友邀請');
+                  }
+
+                  return Column(
+                    children: requests.map((doc) {
+                      final data = doc.data() as Map<String, dynamic>;
+                      return ListTile(
+                        title: FutureBuilder<DocumentSnapshot>(
+                          future: FirebaseFirestore.instance
+                              .collection('users')
+                              .doc(data['fromUid'])
+                              .get(),
+                          builder: (context, snapshot) {
+                            if (!snapshot.hasData) {
+                              return const Text('載入中...');
+                            }
+
+                            final userData = snapshot.data!.data() as Map<String, dynamic>;
+
+                            return Text(
+                              '${userData['name']} (${userData['email']})',
+                            );
+                          },
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.check, color: Colors.green),
+                              onPressed: () => acceptFriendRequest(doc.id, data['fromUid']),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close, color: Colors.red),
+                              onPressed: () => rejectFriendRequest(doc.id),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  );
+                },
               ),
             ]
           ],

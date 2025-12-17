@@ -9,6 +9,7 @@ import 'location_service.dart';
 import 'firestore_service.dart';
 import 'route_service.dart';
 import 'friends_page.dart';
+import 'friends_list_page.dart';
 
 
 class HomePage extends StatefulWidget {
@@ -270,12 +271,25 @@ class _HomePageState extends State<HomePage> {
               ),
             ListTile(
               leading: const Icon(Icons.people),
-              title: const Text("朋友列表"),
+              title: const Text("好友申請"),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => FriendsPage()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.list),
+              title: const Text("好友列表"),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const FriendsListPage(),
+                  ),
                 );
               },
             ),
