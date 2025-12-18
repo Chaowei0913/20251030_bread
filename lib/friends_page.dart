@@ -54,7 +54,9 @@ class _FriendsPageState extends State<FriendsPage> {
       await userDoc.set({
         'name': user.displayName ?? '匿名',
         'email': user.email ?? '',
-        'friends': [], // 好友陣列
+        'photoURL': user.photoURL ?? '',   // ⭐ 給地圖頭像用
+        'friends': [],
+        'shareLocation': true,              // ⭐ 是否分享位置（預設開）
       });
       debugPrint('✅ Firebase users document 已建立: ${user.uid}');
     } else {

@@ -10,6 +10,7 @@ import 'firestore_service.dart';
 import 'route_service.dart';
 import 'friends_page.dart';
 import 'friends_list_page.dart';
+import 'waypoint_service.dart';
 
 
 class HomePage extends StatefulWidget {
@@ -36,6 +37,13 @@ class _HomePageState extends State<HomePage> {
   // === 登入相關 ===
   User? user = FirebaseAuth.instance.currentUser;
 
+  bool isSharingLocation = false; // 代表是否分享位置
+  Timer? _shareLocationTimer;      // 用來定時上傳位置
+
+  //標點部分
+  final waypointService = WaypointService();
+  final List<Marker> waypointMarkers = [];
+
   // 初始化時檢查登入狀態
   @override
   void initState() {
@@ -50,6 +58,7 @@ class _HomePageState extends State<HomePage> {
   // === 資源清理：App 關閉時停止追蹤 ===
   @override
   void dispose() {
+    _shareLocationTimer?.cancel();
     _locationSubscription?.cancel();
     super.dispose();
   }
@@ -272,6 +281,90 @@ class _HomePageState extends State<HomePage> {
           );
         });
       }
+  void _startSharingLocation() {
+    if (user == null) return;
+
+    _shareLocationTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
+      final position = await LocationService.getCurrentLocation();
+      if (position != null) {
+        await FirestoreService.uploadLocation(position);
+        debugPrint('☁️ 分享位置上傳: $position');
+      }
+    });
+  }
+
+  void _stopSharingLocation() {
+    // 停掉定時上傳
+    _shareLocationTimer?.cancel();
+    _shareLocationTimer = null;
+
+    // 暫時不清除 Firestore 上的座標，保留原位置
+    debugPrint('分享位置已停止，但 Firestore 上的座標保留');
+  }
+
+  void _addWaypoint(LatLng position) async {
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('🛑 請先登入才能新增標記點')),
+      );
+      return;
+    }
+
+    await waypointService.addWaypoint(
+      latitude: position.latitude,
+      longitude: position.longitude,
+      message: "這裡有好玩的！",
+      userId: user!.uid,
+    );
+
+    setState(() {
+      waypointMarkers.add(
+        Marker(
+          point: position,
+          width: 40,
+          height: 40,
+          child: GestureDetector(
+            onTap: () => _deleteWaypoint(position), // 點擊刪除
+            child: const Icon(Icons.star, color: Colors.yellowAccent, size: 35),
+          ),
+        ),
+      );
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('✅ 已新增標記點')),
+    );
+  }
+
+  void _deleteWaypoint(LatLng position) async {
+    try {
+      // 從 Firestore 讀取所有 Waypoints
+      final waypoints = await waypointService.getWaypoints();
+
+      // 找到符合座標的 waypoint
+      final target = waypoints.firstWhere(
+            (wp) => wp.latitude == position.latitude && wp.longitude == position.longitude,
+        orElse: () => throw Exception("找不到標記點"),
+      );
+
+      // 刪除 Firestore 資料
+      await waypointService.deleteWaypoint(target.id);
+
+      // 從地圖上移除
+      setState(() {
+        waypointMarkers.removeWhere((marker) => marker.point == position);
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('🗑️ 標記點已刪除')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('刪除失敗: $e')),
+      );
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -333,6 +426,21 @@ class _HomePageState extends State<HomePage> {
                 );
               },
             ),
+            SwitchListTile(
+              title: const Text("分享我的位置"),
+              value: isSharingLocation,
+              onChanged: (value) {
+                setState(() {
+                  isSharingLocation = value;
+                });
+
+                if (isSharingLocation) {
+                  _startSharingLocation();
+                } else {
+                  _stopSharingLocation();
+                }
+              },
+            )
           ],
         ),
       ),
@@ -345,6 +453,7 @@ class _HomePageState extends State<HomePage> {
               initialCenter: currentPosition ?? LatLng(23.0169, 120.2324),
               initialZoom: 16,
               onTap: (tapPosition, point) => _setDestination(point),
+              onLongPress: (tapPosition, point) => _addWaypoint(point),
             ),
             children: [
               TileLayer(
@@ -379,13 +488,15 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ],
                 ),
+              if (waypointMarkers.isNotEmpty)
+                MarkerLayer(markers: waypointMarkers),
             ],
           ),
 
           // 2. 獨立的「開始/停止記錄」按鈕 (定位到左下角)
           // ⚠️ 注意：這個 Positioned Widget 必須在 Stack 的 children 列表內！
           Positioned(
-            bottom: 150, // 距離底部 200
+            bottom: 150, // 與底部距離
             left: 20,    // 距離左側 20
             child: FloatingActionButton.extended(
               heroTag: "btn_record",
@@ -425,14 +536,14 @@ class _HomePageState extends State<HomePage> {
             foregroundColor: Colors.red,
             child: const Icon(Icons.delete),
           ),
-          const SizedBox(height: 40), // 增加底部間距
+          const SizedBox(height: 10), // 增加底部間距
 
           // 取得目前位置（不記錄）
           FloatingActionButton(
             heroTag: "btn_get_location",
             onPressed: _getCurrentLocationOnce,
-            backgroundColor: Colors.orange,
-            foregroundColor: Colors.white,
+            backgroundColor: Colors.white,
+            foregroundColor: Colors.redAccent,
             child: const Icon(Icons.navigation),
           ),
           const SizedBox(height: 10),
