@@ -10,6 +10,7 @@ import 'firestore_service.dart';
 import 'route_service.dart';
 import 'friends_page.dart';
 import 'friends_list_page.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 
 class HomePage extends StatefulWidget {
@@ -28,6 +29,7 @@ class _HomePageState extends State<HomePage> {
 
   // === 錄製狀態與 Stream 管理 (取代 Timer) ===
   bool isRecording = false;
+  bool favoriteMode = false;
   LatLng? lastRecordedPosition;
   double minDistance = 5.0; // GPS 最小移動距離（公尺）
   StreamSubscription<LatLng>? _locationSubscription;
@@ -272,6 +274,121 @@ class _HomePageState extends State<HomePage> {
           );
         });
       }
+  void _showAddFavoriteDialog(LatLng point) {
+    final TextEditingController commentController =
+    TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('新增收藏地點 ⭐'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('標記者：${user?.displayName ?? "匿名"}'),
+            const SizedBox(height: 10),
+            TextField(
+              controller: commentController,
+              decoration: const InputDecoration(
+                labelText: '留言',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            child: const Text('儲存'),
+            onPressed: () async {
+              await FirebaseFirestore.instance
+                  .collection('favorites')
+                  .add({
+                'uid': user!.uid,
+                'name': user!.displayName ?? '匿名',
+                'comment': commentController.text,
+                'lat': point.latitude,
+                'lng': point.longitude,
+                'createdAt': Timestamp.now(),
+              });
+
+              Navigator.pop(context);
+
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('⭐ 收藏地點已新增')),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+  void _showFavoriteDetail(String docId, Map<String, dynamic> data) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('收藏地點'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('標記者：${data['name']}'),
+            const SizedBox(height: 8),
+            Text('留言：${data['comment']}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('關閉'),
+          ),
+          if (data['uid'] == user?.uid)
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _confirmDeleteFavorite(docId);
+              },
+              child: const Text(
+                '刪除',
+                style: TextStyle(color: Colors.red),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+  void _confirmDeleteFavorite(String docId) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('刪除收藏'),
+        content: const Text('確定要刪除這個收藏地點嗎？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              await FirebaseFirestore.instance
+                  .collection('favorites')
+                  .doc(docId)
+                  .delete();
+
+              Navigator.pop(context);
+
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('🗑 收藏地點已刪除')),
+              );
+            },
+            child: const Text('刪除'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -333,6 +450,17 @@ class _HomePageState extends State<HomePage> {
                 );
               },
             ),
+            if (user != null)
+              SwitchListTile(
+                secondary: const Icon(Icons.star),
+                title: const Text('收藏地點模式'),
+                value: favoriteMode,
+                onChanged: (value) {
+                  setState(() {
+                    favoriteMode = value;
+                  });
+                },
+              ),
           ],
         ),
       ),
@@ -344,7 +472,17 @@ class _HomePageState extends State<HomePage> {
             options: MapOptions(
               initialCenter: currentPosition ?? LatLng(23.0169, 120.2324),
               initialZoom: 16,
-              onTap: (tapPosition, point) => _setDestination(point),
+              onTap: (tapPosition, point) {
+                if (!favoriteMode) {
+                  // 收藏模式「關閉」→ 保持原本功能
+                  _setDestination(point);
+                }
+              },
+              onLongPress: (tapPosition, point) {
+                if (favoriteMode) {
+                  _showAddFavoriteDialog(point); // ⭐⭐ 這行是關鍵
+                }
+              },
             ),
             children: [
               TileLayer(
@@ -379,13 +517,43 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ],
                 ),
+              if (user != null)
+                StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('favorites')
+                      .where('uid', isEqualTo: user!.uid)
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) return const SizedBox();
+
+                    return MarkerLayer(
+                      markers: snapshot.data!.docs.map((doc) {
+                        final data = doc.data() as Map<String, dynamic>;
+
+                        return Marker(
+                          width: 40,
+                          height: 40,
+                          point: LatLng(data['lat'], data['lng']),
+                          child: GestureDetector(
+                            onTap: () => _showFavoriteDetail(doc.id, data),
+                            child: const Icon(
+                              Icons.star,
+                              color: Colors.amber,
+                              size: 40,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    );
+                  },
+                ),
             ],
           ),
 
           // 2. 獨立的「開始/停止記錄」按鈕 (定位到左下角)
           // ⚠️ 注意：這個 Positioned Widget 必須在 Stack 的 children 列表內！
           Positioned(
-            bottom: 150, // 距離底部 200
+            bottom: 140, // 距離底部
             left: 20,    // 距離左側 20
             child: FloatingActionButton.extended(
               heroTag: "btn_record",
@@ -425,14 +593,14 @@ class _HomePageState extends State<HomePage> {
             foregroundColor: Colors.red,
             child: const Icon(Icons.delete),
           ),
-          const SizedBox(height: 40), // 增加底部間距
+          const SizedBox(height: 10), // 增加底部間距
 
           // 取得目前位置（不記錄）
           FloatingActionButton(
             heroTag: "btn_get_location",
             onPressed: _getCurrentLocationOnce,
-            backgroundColor: Colors.orange,
-            foregroundColor: Colors.white,
+            backgroundColor: Colors.white,
+            foregroundColor: Colors.orange,
             child: const Icon(Icons.navigation),
           ),
           const SizedBox(height: 10),
