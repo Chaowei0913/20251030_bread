@@ -11,6 +11,7 @@ import 'route_service.dart';
 import 'friends_page.dart';
 import 'friends_list_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'favorites_page.dart';
 
 
 class HomePage extends StatefulWidget {
@@ -326,6 +327,9 @@ class _HomePageState extends State<HomePage> {
     );
   }
   void _showFavoriteDetail(String docId, Map<String, dynamic> data) {
+    final Timestamp ts = data['createdAt'] as Timestamp;
+    final DateTime time = ts.toDate();
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -336,6 +340,12 @@ class _HomePageState extends State<HomePage> {
             Text('標記者：${data['name']}'),
             const SizedBox(height: 8),
             Text('留言：${data['comment']}'),
+            const SizedBox(height: 8),
+            Text(
+              '紀錄時間：'
+                  '${time.year}/${time.month}/${time.day} '
+                  '${time.hour}:${time.minute.toString().padLeft(2, '0')}',
+            ),
           ],
         ),
         actions: [
@@ -387,6 +397,17 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
+    );
+  }
+  void _moveToFavorite(LatLng point) {
+    setState(() {
+      destination = null;
+    });
+
+    mapController.move(point, 17);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('⭐ 已移動到收藏地點')),
     );
   }
 
@@ -448,6 +469,22 @@ class _HomePageState extends State<HomePage> {
                     builder: (_) => const FriendsListPage(),
                   ),
                 );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.bookmark),
+              title: const Text('收藏地點'),
+              onTap: () async {
+                Navigator.pop(context);
+
+                final LatLng? result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => FavoritesPage()),
+                );
+
+                if (result != null) {
+                  _moveToFavorite(result);
+                }
               },
             ),
             if (user != null)
