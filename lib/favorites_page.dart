@@ -19,7 +19,7 @@ class FavoritesPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('我的收藏地點 ⭐')),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
+        stream: FirebaseFirestore.instance  
             .collection('favorites')
             .where('uid', isEqualTo: user.uid)
             .orderBy('createdAt', descending: true)

@@ -12,6 +12,7 @@ import 'friends_page.dart';
 import 'friends_list_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'favorites_page.dart';
+import 'package:geolocator/geolocator.dart';
 
 
 class HomePage extends StatefulWidget {
@@ -27,7 +28,10 @@ class _HomePageState extends State<HomePage> {
   LatLng? destination;
   final MapController mapController = MapController();
   final List<LatLng> pathPoints = [];
+  List<String> friendUids = [];
 
+
+  bool shareLocation = false;
   // === 錄製狀態與 Stream 管理 (取代 Timer) ===
   bool isRecording = false;
   bool favoriteMode = false;
@@ -43,6 +47,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _loadShareSetting();
     FirebaseAuth.instance.authStateChanges().listen((User? newUser) {
       setState(() {
         user = newUser;
@@ -85,6 +90,30 @@ class _HomePageState extends State<HomePage> {
     _stopRecording();
     await GoogleSignIn().signOut();
     await FirebaseAuth.instance.signOut();
+  }
+
+  Future<void> updateShareLocation(bool value) async {
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    await FirebaseFirestore.instance.collection('users').doc(uid).update({
+      'shareLocation': value,
+    });
+  }
+  Future<void> _loadFriends() async {
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .get();
+
+    final data = userDoc.data();
+    if (data == null) return;
+
+    setState(() {
+      friendUids = List<String>.from(data['friends'] ?? []);
+    });
+
+    print(" 好友列表: $friendUids");
   }
 
   // === 錄製控制：切換開始/結束 ===
@@ -237,7 +266,7 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _getCurrentLocationOnce() {
+  void _getCurrentLocationOnce() async {
     if (user == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('🛑 請先登入才能取得位置')),
@@ -245,36 +274,51 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    // 如果正在錄製，直接提示
-    if (isRecording) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('⚠️ 記錄中，請先停止記錄')),
-      );
-      return;
-    }
-
-    // 取消之前的單次定位（避免重複）
-    _singleLocationSubscription?.cancel();
-
-    _singleLocationSubscription =
-        LocationService.getPositionStream().listen((position) {
-          setState(() {
-            currentPosition = position;
-          });
-
-          // 地圖移動到目前位置
-          mapController.move(position, 16);
-
-          // ✅ 只取一次就停止
-          _singleLocationSubscription?.cancel();
-          _singleLocationSubscription = null;
-        }, onError: (e) {
-          debugPrint('❌ 取得位置失敗: $e');
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('取得位置失敗: $e')),
-          );
-        });
+    try {
+      // 1. 檢查權限 (避免因為沒權限導致後面不上傳)
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) return;
       }
+
+      // 2. 獲取位置
+      final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high
+      );
+
+      setState(() {
+        currentPosition = LatLng(pos.latitude, pos.longitude);
+      });
+
+      mapController.move(currentPosition!, 16);
+
+      // 3. 上傳到 Firestore
+      final uid = user!.uid;
+
+      await FirebaseFirestore.instance
+          .collection('locations')
+          .doc(uid)
+          .set({
+        'uid': uid, // 建議存入 uid，方便後續查詢
+        'lat': pos.latitude,
+        'lng': pos.longitude,
+        'shareLocation': shareLocation, // 使用你 State 裡的變數
+        'updatedAt': FieldValue.serverTimestamp(), // 確保使用 Firebase 伺服器時間
+      }, SetOptions(merge: false)); // 這裡改 false 可以直接覆蓋掉舊的亂資料
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('📡 位置已更新並同步')),
+      );
+
+    } catch (e) {
+      debugPrint('❌ 取得位置失敗: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('取得位置失敗: $e')),
+      );
+    }
+  }
+
   void _showAddFavoriteDialog(LatLng point) {
     final TextEditingController commentController =
     TextEditingController();
@@ -410,6 +454,21 @@ class _HomePageState extends State<HomePage> {
       const SnackBar(content: Text('⭐ 已移動到收藏地點')),
     );
   }
+  void _loadShareSetting() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .get();
+
+    if (doc.exists && doc.data()!.containsKey('shareLocation')) {
+      setState(() {
+        shareLocation = doc['shareLocation'];
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -487,6 +546,18 @@ class _HomePageState extends State<HomePage> {
                 }
               },
             ),
+            if (user != null)
+              SwitchListTile(
+                secondary: const Icon(Icons.share_location),
+                title: const Text('分享我的位置給好友'),
+                value: shareLocation,
+                onChanged: (value) {
+                  setState(() {
+                    shareLocation = value;
+                  });
+                  updateShareLocation(value);
+                },
+              ),
             if (user != null)
               SwitchListTile(
                 secondary: const Icon(Icons.star),
@@ -584,6 +655,33 @@ class _HomePageState extends State<HomePage> {
                     );
                   },
                 ),
+              StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('locations')
+                    .where('shareLocation', isEqualTo: true)
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const SizedBox();
+
+                  final markers = snapshot.data!.docs
+                      .where((doc) => friendUids.contains(doc.id))  // doc.id = uid
+                      .map((doc) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    final lat = data['lat'];
+                    final lng = data['lng'];
+
+                    return Marker(
+                      width: 40,
+                      height: 40,
+                      point: LatLng(lat, lng),
+                      child: const Icon(Icons.person_pin_circle, size: 36, color: Colors.blue),
+                    );
+                  })
+                      .toList();
+
+                  return MarkerLayer(markers: markers);
+                },
+              )
             ],
           ),
 
