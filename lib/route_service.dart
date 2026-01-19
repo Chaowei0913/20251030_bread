@@ -1,22 +1,22 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class RouteService {
-  /// 使用 OSRM 查詢從起點到終點的真實道路路線
   static Future<List<LatLng>> getRoute(LatLng start, LatLng end) async {
     final url =
-        'https://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${end.longitude},${end.latitude}?overview=full&geometries=geojson';
+        'https://router.project-osrm.org/route/v1/driving/'
+        '${start.longitude},${start.latitude};'
+        '${end.longitude},${end.latitude}'
+        '?overview=full&geometries=geojson';
 
     final response = await http.get(Uri.parse(url));
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
-
-      // routes[0].geometry.coordinates 是 List<List<double>>
       final route = data['routes'][0]['geometry']['coordinates'] as List;
 
-      // 轉換成 LatLng 座標格式 (OSRM 回傳的是 [lon, lat])
       return route.map((coord) {
         final lon = coord[0] as double;
         final lat = coord[1] as double;
@@ -25,5 +25,35 @@ class RouteService {
     } else {
       throw Exception('OSRM 請求失敗: ${response.statusCode}');
     }
+  }
+
+  // =====================================================
+  // 👣【B】實際走過的路（我們現在新增的）
+  // =====================================================
+
+  final List<LatLng> _recordedPoints = [];
+
+  /// 加入一個實際定位點
+  void addPoint(LatLng point) {
+    _recordedPoints.add(point);
+  }
+
+  /// 清除目前紀錄
+  void clear() {
+    _recordedPoints.clear();
+  }
+
+  /// 儲存到 Firestore
+  Future<void> saveRoute(String uid) async {
+    if (_recordedPoints.length < 2) return;
+
+    await FirebaseFirestore.instance.collection('routes').add({
+      'userId': uid,
+      'createdAt': Timestamp.now(),
+      'points': _recordedPoints.map((p) => {
+        'lat': p.latitude,
+        'lng': p.longitude,
+      }).toList(),
+    });
   }
 }

@@ -29,6 +29,8 @@ class _HomePageState extends State<HomePage> {
   final MapController mapController = MapController();
   final List<LatLng> pathPoints = [];
   List<String> friendUids = [];
+  Map<String, Map<String, dynamic>> allUsers = {};
+  final RouteService routeService = RouteService();
 
 
   bool shareLocation = false;
@@ -48,10 +50,21 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _loadShareSetting();
+    _loadFriends();
+
     FirebaseAuth.instance.authStateChanges().listen((User? newUser) {
-      setState(() {
-        user = newUser;
-      });
+      user = newUser;
+      if (newUser != null) {
+        _loadFriends();
+      }
+      setState(() {}); // 放一個就好
+    });
+
+    FirebaseFirestore.instance.collection('users').snapshots().listen((snapshot) {
+      for (var doc in snapshot.docs) {
+        allUsers[doc.id] = doc.data() as Map<String, dynamic>;
+      }
+      setState(() {}); // users 更新才更新畫面
     });
   }
 
@@ -161,7 +174,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  void _stopRecording() {
+  void _stopRecording() async {
     _locationSubscription?.cancel();
     _locationSubscription = null;
 
@@ -169,9 +182,41 @@ class _HomePageState extends State<HomePage> {
       isRecording = false;
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('🛑 路線記錄停止，路徑已儲存。')),
+    if (user == null || pathPoints.length < 2) {
+      return;
+    }
+
+    final shouldSave = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('儲存本次路線？'),
+          content: const Text('是否要將本次走過的路線儲存起來？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('不儲存'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('儲存'),
+            ),
+          ],
+        );
+      },
     );
+    if (shouldSave == true) {
+      await routeService.saveRoute(user!.uid);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('✅ 路線已儲存')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('❎ 路線未儲存')),
+      );
+    }
+    routeService.clear();
   }
 
   // === 處理新的位置點、濾波並上傳 (核心邏輯) ===
@@ -197,6 +242,7 @@ class _HomePageState extends State<HomePage> {
         setState(() {
           currentPosition = position;
           pathPoints.add(position);
+          routeService.addPoint(position);
         });
         lastRecordedPosition = position;
 
@@ -470,6 +516,76 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  void _showFriendDialog(String name, String? photoUrl) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 👤 左邊頭像
+                ClipOval(
+                  child: photoUrl != null
+                      ? Image.network(
+                    photoUrl,
+                    width: 48,
+                    height: 48,
+                    fit: BoxFit.cover,
+                  )
+                      : Container(
+                    width: 48,
+                    height: 48,
+                    color: Colors.grey.shade300,
+                    child: const Icon(Icons.person, size: 28),
+                  ),
+                ),
+
+                const SizedBox(width: 14),
+
+                // 🧑 右邊名字
+                Expanded(
+                  child: Text(
+                    name,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _moveToFriend(String friendUid) async {
+    final doc = await FirebaseFirestore.instance
+        .collection('locations')
+        .doc(friendUid)
+        .get();
+
+    if (!doc.exists) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('好友尚未分享位置')),
+      );
+      return;
+    }
+
+    final data = doc.data()!;
+    final lat = data['lat'];
+    final lng = data['lng'];
+
+    mapController.move(LatLng(lat, lng), 16.0,);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -520,15 +636,16 @@ class _HomePageState extends State<HomePage> {
             ListTile(
               leading: const Icon(Icons.list),
               title: const Text("好友列表"),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const FriendsListPage(),
-                  ),
-                );
-              },
+                onTap: () async {
+                  Navigator.pop(context);
+                  final selectedUid = await Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const FriendsListPage()),
+                  );
+                  if (selectedUid != null) {
+                    _moveToFriend(selectedUid);
+                  }
+                }
             ),
             ListTile(
               leading: const Icon(Icons.bookmark),
@@ -669,15 +786,51 @@ class _HomePageState extends State<HomePage> {
                     final data = doc.data() as Map<String, dynamic>;
                     final lat = data['lat'];
                     final lng = data['lng'];
+                    final uid = doc.id;
+
+                    final userInfo = allUsers[uid]; // 從上面同步抓
+                    final iconUrl = userInfo?['photoURL'];
+                    final name = userInfo?['name'] ?? '好友';
 
                     return Marker(
-                      width: 40,
-                      height: 40,
+                      width: 35,
+                      height: 35,
                       point: LatLng(lat, lng),
-                      child: const Icon(Icons.person_pin_circle, size: 36, color: Colors.blue),
+                      child: GestureDetector(
+                        onTap: () {
+                          _showFriendDialog(name, iconUrl);
+                        },
+                        child: GestureDetector(
+                          onTap: () {
+                            _showFriendDialog(name, iconUrl);
+                          },
+                          child: Container(
+                            width: 42,
+                            height: 42,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 3),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Colors.black26,
+                                  blurRadius: 4,
+                                  offset: Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: ClipOval(
+                              child: iconUrl != null
+                                  ? Image.network(
+                                iconUrl,
+                                fit: BoxFit.cover,
+                              )
+                                  : const Icon(Icons.person, size: 28),
+                            ),
+                          ),
+                        ),
+                      ),
                     );
-                  })
-                      .toList();
+                  }).toList();
 
                   return MarkerLayer(markers: markers);
                 },

@@ -26,30 +26,23 @@ class _FriendsMapPageState extends State<FriendsMapPage> {
 
   void _listenFriendLocations() {
     FirebaseFirestore.instance
-        .collection('bread')
-        .where('uid', isEqualTo: widget.friendUid)
-        .orderBy('timestamp')
+        .collection('locations')
+        .doc(widget.friendUid)
         .snapshots()
         .listen((snapshot) {
-      final points = <LatLng>[];
+      final data = snapshot.data();
+      if (data == null) return;
 
-      for (var doc in snapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>;
-        if (data["latitude"] != null) {
-          points.add(LatLng(data['latitude'], data['longitude']));
-        }
-      }
+      final lat = data['lat'];
+      final lng = data['lng'];
+
+      if (lat == null || lng == null) return;
 
       setState(() {
-        friendRoute = points;
-        if (points.isNotEmpty) {
-          friendCurrentPosition = points.last;
-        }
+        friendCurrentPosition = LatLng(lat, lng);
       });
 
-      if (friendCurrentPosition != null) {
-        mapController.move(friendCurrentPosition!, 16);
-      }
+      mapController.move(friendCurrentPosition!, 16);
     });
   }
 
