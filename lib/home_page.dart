@@ -13,7 +13,10 @@ import 'friends_list_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'favorites_page.dart';
 import 'package:geolocator/geolocator.dart';
-
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import 'route_history_page.dart';
+import 'location_privacy_page.dart';
+import 'routes_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -31,6 +34,10 @@ class _HomePageState extends State<HomePage> {
   List<String> friendUids = [];
   Map<String, Map<String, dynamic>> allUsers = {};
   final RouteService routeService = RouteService();
+  List<String> myHideFrom = [];
+  Map<String, bool> locationPrivacy = {};
+  List<String> hideFrom = [];
+  List<String> shareTo = [];
 
 
   bool shareLocation = false;
@@ -49,23 +56,49 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+
     _loadShareSetting();
     _loadFriends();
+    _loadLocationPrivacy();
+    _loadPrivacySetting();
 
+    // 監聽登入狀態
     FirebaseAuth.instance.authStateChanges().listen((User? newUser) {
-      user = newUser;
+      setState(() {
+        user = newUser;
+      });
+
       if (newUser != null) {
         _loadFriends();
       }
-      setState(() {}); // 放一個就好
     });
 
-    FirebaseFirestore.instance.collection('users').snapshots().listen((snapshot) {
+    // 監聽所有使用者（頭像 / 名字 / shareTo）
+    FirebaseFirestore.instance
+        .collection('users')
+        .snapshots()
+        .listen((snapshot) {
       for (var doc in snapshot.docs) {
         allUsers[doc.id] = doc.data() as Map<String, dynamic>;
       }
-      setState(() {}); // users 更新才更新畫面
+      setState(() {});
     });
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .snapshots()
+          .listen((doc) {
+        final data = doc.data();
+        if (data == null) return;
+
+        setState(() {
+          myHideFrom = List<String>.from(data['hideFrom'] ?? []);
+        });
+      });
+    }
   }
 
   // === 資源清理：App 關閉時停止追蹤 ===
@@ -129,6 +162,50 @@ class _HomePageState extends State<HomePage> {
     print(" 好友列表: $friendUids");
   }
 
+  Future<void> _loadLocationPrivacy() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    final snapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('location_privacy')
+        .get();
+
+    final Map<String, bool> temp = {};
+
+    for (var doc in snapshot.docs) {
+      temp[doc.id] = doc['allow'] == true;
+    }
+
+    setState(() {
+      locationPrivacy = temp;
+    });
+
+    debugPrint("🔒 隱私設定: $locationPrivacy");
+  }
+
+  Future<void> _loadPrivacySetting() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .get();
+
+    final data = doc.data();
+    if (data == null) return;
+
+    setState(() {
+      hideFrom = List<String>.from(data['hideFrom'] ?? []);
+      shareTo = List<String>.from(data['shareTo'] ?? []);
+    });
+
+    debugPrint("🙈 hideFrom = $hideFrom");
+    debugPrint("📤 shareTo = $shareTo");
+  }
+
   // === 錄製控制：切換開始/結束 ===
   void _toggleRecording() {
     if (user == null) {
@@ -182,16 +259,44 @@ class _HomePageState extends State<HomePage> {
       isRecording = false;
     });
 
-    if (user == null || pathPoints.length < 2) {
-      return;
-    }
+    if (user == null || pathPoints.length < 2) return;
+
+    String routeName = '';
+    Color selectedColor = Colors.orange;
+    Color pickerColor = selectedColor;
 
     final shouldSave = await showDialog<bool>(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: const Text('儲存本次路線？'),
-          content: const Text('是否要將本次走過的路線儲存起來？'),
+          content: StatefulBuilder(
+            builder: (context, setDialogState) {
+              return SingleChildScrollView(
+                  child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    decoration: const InputDecoration(
+                      labelText: '路線名稱',
+                    ),
+                    onChanged: (v) => routeName = v,
+                  ),
+                  const SizedBox(height: 12),
+                  ColorPicker(
+                    pickerColor: selectedColor,
+                    onColorChanged: (color) {
+                      setDialogState(() {
+                        selectedColor = color;
+                      });
+                    },
+                    enableAlpha: false,
+                    displayThumbColor: true,
+                  ),
+                ],)
+              );
+            },
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -206,14 +311,16 @@ class _HomePageState extends State<HomePage> {
       },
     );
     if (shouldSave == true) {
-      await routeService.saveRoute(user!.uid);
+      await routeService.saveRoute(
+        uid: user!.uid,
+        name: routeName,
+        colorValue: selectedColor.value,
+        userName: user!.displayName ?? '匿名',
+        userPhoto: user!.photoURL,
+      );
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('✅ 路線已儲存')),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('❎ 路線未儲存')),
       );
     }
     routeService.clear();
@@ -586,6 +693,28 @@ class _HomePageState extends State<HomePage> {
     mapController.move(LatLng(lat, lng), 16.0,);
   }
 
+  Widget _colorDot(
+      Color color,
+      Color selected,
+      Function(Color) onTap,
+      ) {
+    return GestureDetector(
+      onTap: () => setState(() => onTap(color)),
+      child: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: selected == color ? Colors.black : Colors.transparent,
+            width: 3,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -661,6 +790,32 @@ class _HomePageState extends State<HomePage> {
                 if (result != null) {
                   _moveToFavorite(result);
                 }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.route),
+              title: const Text('歷史路線'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const RoutesPage(),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.privacy_tip),
+              title: const Text("位置分享設定"),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const LocationPrivacyPage(),
+                  ),
+                );
               },
             ),
             if (user != null)
@@ -745,6 +900,76 @@ class _HomePageState extends State<HomePage> {
               if (user != null)
                 StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance
+                      .collection('locations')
+                      .where('shareLocation', isEqualTo: true)
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) return const SizedBox();
+
+                    final List<Marker> markers = [];
+
+                    for (final doc in snapshot.data!.docs) {
+                      final uid = doc.id;
+
+                      // 1️⃣ 必須是好友
+                      if (!friendUids.contains(uid)) continue;
+
+                      final friendData = allUsers[uid];
+                      if (friendData == null) continue;
+
+                      // 2️⃣ 對方有分享給我
+                      final List friendShareTo =
+                      List<String>.from(friendData['shareTo'] ?? []);
+                      if (!friendShareTo.contains(user!.uid)) continue;
+
+                      // 3️⃣ 我沒有隱藏他
+                      if (hideFrom.contains(uid)) continue;
+
+                      final data = doc.data() as Map<String, dynamic>;
+                      final lat = data['lat'];
+                      final lng = data['lng'];
+
+                      final iconUrl = friendData['photoURL'];
+                      final name = friendData['name'] ?? '好友';
+
+                      markers.add(
+                        Marker(
+                          width: 35,
+                          height: 35,
+                          point: LatLng(lat, lng),
+                          child: GestureDetector(
+                            onTap: () => _showFriendDialog(name, iconUrl),
+                            child: Container(
+                              width: 42,
+                              height: 42,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 3),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Colors.black26,
+                                    blurRadius: 4,
+                                    offset: Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: ClipOval(
+                                child: iconUrl != null
+                                    ? Image.network(iconUrl, fit: BoxFit.cover)
+                                    : const Icon(Icons.person, size: 28),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+
+                    return MarkerLayer(markers: markers);
+                  },
+                ),
+              if (user != null)
+                StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
                       .collection('favorites')
                       .where('uid', isEqualTo: user!.uid)
                       .snapshots(),
@@ -772,69 +997,6 @@ class _HomePageState extends State<HomePage> {
                     );
                   },
                 ),
-              StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('locations')
-                    .where('shareLocation', isEqualTo: true)
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData) return const SizedBox();
-
-                  final markers = snapshot.data!.docs
-                      .where((doc) => friendUids.contains(doc.id))  // doc.id = uid
-                      .map((doc) {
-                    final data = doc.data() as Map<String, dynamic>;
-                    final lat = data['lat'];
-                    final lng = data['lng'];
-                    final uid = doc.id;
-
-                    final userInfo = allUsers[uid]; // 從上面同步抓
-                    final iconUrl = userInfo?['photoURL'];
-                    final name = userInfo?['name'] ?? '好友';
-
-                    return Marker(
-                      width: 35,
-                      height: 35,
-                      point: LatLng(lat, lng),
-                      child: GestureDetector(
-                        onTap: () {
-                          _showFriendDialog(name, iconUrl);
-                        },
-                        child: GestureDetector(
-                          onTap: () {
-                            _showFriendDialog(name, iconUrl);
-                          },
-                          child: Container(
-                            width: 42,
-                            height: 42,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white, width: 3),
-                              boxShadow: const [
-                                BoxShadow(
-                                  color: Colors.black26,
-                                  blurRadius: 4,
-                                  offset: Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: ClipOval(
-                              child: iconUrl != null
-                                  ? Image.network(
-                                iconUrl,
-                                fit: BoxFit.cover,
-                              )
-                                  : const Icon(Icons.person, size: 28),
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList();
-
-                  return MarkerLayer(markers: markers);
-                },
-              )
             ],
           ),
 

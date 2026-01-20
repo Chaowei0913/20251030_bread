@@ -44,11 +44,20 @@ class RouteService {
   }
 
   /// 儲存到 Firestore
-  Future<void> saveRoute(String uid) async {
+  Future<void> saveRoute({
+    required String uid,
+    required String name,
+    required int colorValue,
+    required String userName,
+    String? userPhoto,
+  }) async {
     if (_recordedPoints.length < 2) return;
 
     await FirebaseFirestore.instance.collection('routes').add({
       'userId': uid,
+      'userPhoto': userPhoto,
+      'name': name.isEmpty ? '未命名路線' : name,
+      'color': colorValue,
       'createdAt': Timestamp.now(),
       'points': _recordedPoints.map((p) => {
         'lat': p.latitude,
