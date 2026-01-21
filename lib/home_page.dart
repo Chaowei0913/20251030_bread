@@ -17,6 +17,7 @@ import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'route_history_page.dart';
 import 'location_privacy_page.dart';
 import 'routes_page.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -222,36 +223,25 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _startRecording() {
+  void _startRecording() async {
     setState(() {
       isRecording = true;
       pathPoints.clear();
       lastRecordedPosition = null;
     });
 
-    _locationSubscription = LocationService.getPositionStream().listen(
-          (position) {
-        _processNewLocation(position);
-      },
-      onError: (e) {
-        _stopRecording();
-        debugPrint('❌ GPS 追蹤 Stream 錯誤: $e');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('GPS 追蹤發生錯誤，已停止記錄: $e')),
-        );
-      },
-      onDone: () {
-        debugPrint('GPS Stream 完成 (通常不會發生)');
-      },
-      cancelOnError: false,
-    );
+    // ✅ 啟動背景服務
+    final service = FlutterBackgroundService();
+    await service.startService();
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('✅ 路線記錄開始，持續追蹤中...')),
+      const SnackBar(content: Text('✅ 背景定位已啟動')),
     );
   }
 
   void _stopRecording() async {
+    final service = FlutterBackgroundService();
+    service.invoke('stop');
     _locationSubscription?.cancel();
     _locationSubscription = null;
 

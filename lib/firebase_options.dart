@@ -17,10 +17,7 @@ import 'package:flutter/foundation.dart'
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
-      throw UnsupportedError(
-        'DefaultFirebaseOptions have not been configured for web - '
-        'you can reconfigure this by running the FlutterFire CLI again.',
-      );
+      return web;
     }
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
@@ -28,15 +25,9 @@ class DefaultFirebaseOptions {
       case TargetPlatform.iOS:
         return ios;
       case TargetPlatform.macOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for macos - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return macos;
       case TargetPlatform.windows:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for windows - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return windows;
       case TargetPlatform.linux:
         throw UnsupportedError(
           'DefaultFirebaseOptions have not been configured for linux - '
@@ -63,8 +54,40 @@ class DefaultFirebaseOptions {
     messagingSenderId: '236712331640',
     projectId: 'test-1b77a',
     storageBucket: 'test-1b77a.firebasestorage.app',
-    androidClientId: '236712331640-lob4e4t7g51pso0qsmudu1c5ku90sa1r.apps.googleusercontent.com',
+    androidClientId: '236712331640-fumivp9p8vtlo7j9s10it2da4lf8601c.apps.googleusercontent.com',
     iosClientId: '236712331640-vuee2jhds7n9jpqhqi8of29ht5pfergd.apps.googleusercontent.com',
     iosBundleId: 'com.example.breadcrumbs',
   );
+
+  static const FirebaseOptions web = FirebaseOptions(
+    apiKey: 'AIzaSyDyfMMBeyzm8SKbjot6qhkZ1R26hQumgn8',
+    appId: '1:236712331640:web:7433616337e3767a9c208d',
+    messagingSenderId: '236712331640',
+    projectId: 'test-1b77a',
+    authDomain: 'test-1b77a.firebaseapp.com',
+    storageBucket: 'test-1b77a.firebasestorage.app',
+    measurementId: 'G-RH717J7S45',
+  );
+
+  static const FirebaseOptions macos = FirebaseOptions(
+    apiKey: 'AIzaSyCIkDHCPzly7nAjjOa-UpcQE4yAVOAWH8I',
+    appId: '1:236712331640:ios:99f7b8c4be384f7e9c208d',
+    messagingSenderId: '236712331640',
+    projectId: 'test-1b77a',
+    storageBucket: 'test-1b77a.firebasestorage.app',
+    androidClientId: '236712331640-fumivp9p8vtlo7j9s10it2da4lf8601c.apps.googleusercontent.com',
+    iosClientId: '236712331640-vuee2jhds7n9jpqhqi8of29ht5pfergd.apps.googleusercontent.com',
+    iosBundleId: 'com.example.breadcrumbs',
+  );
+
+  static const FirebaseOptions windows = FirebaseOptions(
+    apiKey: 'AIzaSyDyfMMBeyzm8SKbjot6qhkZ1R26hQumgn8',
+    appId: '1:236712331640:web:10b602cce8e871049c208d',
+    messagingSenderId: '236712331640',
+    projectId: 'test-1b77a',
+    authDomain: 'test-1b77a.firebaseapp.com',
+    storageBucket: 'test-1b77a.firebasestorage.app',
+    measurementId: 'G-7RJSLXTTK8',
+  );
+
 }
